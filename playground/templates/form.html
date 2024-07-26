@@ -1,0 +1,11 @@
+<h2 class ="text-center"> 
+    Similarity search
+</h2>
+<form method = "post" action = "form"> 
+    {% csrf_token%} 
+    <div class ="form-group"> 
+        <label for = "name"> Insert search Prompt</label>
+        <input type="text" name = "prompt" class="form-control"> 
+        <input type = "submit" value = "บันทึกข้อมูล" class = "btn btn-success">
+    </div> 
+</form>

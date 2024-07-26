@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Result</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container">
+        <h1 class="mt-5">Result</h1>
+        <div class="card mt-4">
+            <div class="card-body">
+                <h5 class="card-title">Prompt</h5>
+                <p class="card-text">{{ prompt }}</p>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-body">
+                <h5 class="card-title">Top 5 Distances</h5>
+                <ul class="list-group">
+                    {% for distance in top_5_distances %}
+                        <li class="list-group-item">{{ distance }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-body">
+                <h5 class="card-title">Top 5 IDs</h5>
+                <ul class="list-group">
+                    {% for id in top_5_ids %}
+                        <li class="list-group-item">{{ id }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-body">
+                <h5 class="card-title">Products</h5>
+                <ul class="list-group">
+                    {% for product in products %}
+                        <li class="list-group-item">
+                            <strong>UUID:</strong> {{ product.vector_product_id }}<br>
+                            <strong>Name:</strong> {{ product.productName }}<br>
+                            <strong>Description:</strong> {{ product.productDes }}<br>
+                            <strong>Price:</strong> {{ product.price }}
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
