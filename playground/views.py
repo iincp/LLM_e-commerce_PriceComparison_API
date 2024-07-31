@@ -20,8 +20,9 @@ from transformers import AutoTokenizer, AutoModel
 def search_prompt(request): 
     return render(request,"form.html")
 
-def concatenate_keys_with_value_3(data,val):
-    result = []
+def from_prediction(data,val):
+    concate_string_result = []
+    list_of_key = []
 
     for sublist in data:
         concatenated_string = ""
@@ -29,18 +30,10 @@ def concatenate_keys_with_value_3(data,val):
             for key, value in dictionary.items():
                 if value == val:  # Checking if the value is 3
                     concatenated_string += key
-        result.append(concatenated_string.replace(" ",""))
+                    list_of_key.append(key)
+        concate_string_result.append(concatenated_string.replace(" ",""))
 
-    return result
-
-def list_productName(data,val): 
-    productName_entity = []
-    for sublist in data:
-        for dictionary in sublist:
-            for key, value in dictionary.items():
-                if value == val:  # Checking if the value is 3
-                    productName_entity.append(key)
-    return productName_entity
+    return concate_string_result, list_of_key
 
 def extract_integer_from_list(lst):
     items = []
@@ -64,155 +57,123 @@ def remove_space(input_string):
     no_space_string = input_string.replace(" ", "")
     return no_space_string
 
-def form(request) : 
-    if request.method == "POST": 
-        prompt = request.POST["prompt"] 
+def embed_process(prompt): 
+    input_tokens = tokenizer(prompt, padding="max_length",
+                         truncation=True, max_length=256, return_tensors="pt")
+    input_tokens = {k: v.to(device) for k, v in input_tokens.items()}
 
-        prompt= remove_space(prompt) 
+    outputs = model(**input_tokens)
+    prompt_embed = outputs.last_hidden_state[:, 0, :].detach().cpu().numpy()[0]
+    prompt_embed_list_str = '[' + ', '.join(map(str, prompt_embed)) + ']'
 
-        #catagirize the price 
-        model = NERModel(
-    "camembert", "C:/Users/natch/Desktop/Me/Hackatorn/model/Best", use_cuda=False
+    return prompt_embed_list_str
+
+def get_product_uuids(price_in_list, my_dict_instance, about_price, about_brand, average_price):
+    """Main function to get product_uuids based on different conditions."""
+
+    def update_product_uuids(price_condition, price_value=None):
+        """Helper function to update product_uuids based on given conditions."""
+        query_kwargs = {'brand': about_brand[0]} if about_brand and about_brand[0] else {}
+        if price_condition == 'cheaper':
+            query_kwargs['price__lt'] = int(price_value)
+        elif price_condition == 'expensive':
+            query_kwargs['price__gt'] = int(price_value)
+        return Product_ver2.objects.filter(**query_kwargs).values_list('vector_product_id', flat=True)
+
+    def determine_price_bounds():
+        """Determine the appropriate query based on the number of prices in list and price conditions."""
+        if len(price_in_list) == 1:
+            price_cond = 'cheaper' if my_dict_instance.is_cheaper(about_price) else 'expensive'
+            return update_product_uuids(price_cond, price_in_list[0])
+        elif len(price_in_list) == 2:
+            product_uuids = Product_ver2.objects.filter(
+                price__lt=int(max(price_in_list)),
+                price__gt=int(min(price_in_list)),
+                **({'brand': about_brand[0]} if about_brand and about_brand[0] else {})
+            ).values_list('vector_product_id', flat=True)
+            return product_uuids
+        else:
+            return update_product_uuids(None)  # No specific price condition is applied here
+
+    # Main logic of get_product_uuids
+    if len(price_in_list) > 0:
+        return determine_price_bounds()
+    else:
+        average_condition = 'cheaper' if my_dict_instance.is_cheaper(about_price) else 'expensive'
+        average_price_adjusted = average_price * (1.2 if average_condition == 'expensive' else 0.8)
+        return update_product_uuids(average_condition, average_price_adjusted)
+
+#------------------------------LOAD MODEL --------------------------------#
+
+# Provide the path to the directory containing your saved model
+MAIN_PATH = 'C:/Users/natch/Desktop/Me/Hackatorn/model/'
+EMBED_PATH = MAIN_PATH + 'embed/Embedding/'
+NER_PATH = MAIN_PATH + '/Best'
+
+
+#catagirize the price 
+NER_model = NERModel(
+    "camembert",NER_PATH, use_cuda=False
 )
-        prompt_tokenize = word_tokenize(prompt, engine='newmm')
-        print(prompt_tokenize)
-        join_tokenize = " ".join(prompt_tokenize)
+
+embedding_model = SentenceTransformer(EMBED_PATH)
+# Load the WangchanBERTa model and tokenizer
+tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+model = AutoModel.from_pretrained(EMBED_PATH)
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+model.to(device)
+
+#-----------------------------------------------------------------------#
+
+def form(request): 
+    if request.method == "POST": 
+        prompt = request.POST["prompt"].replace(" ", "") 
+    #NER ON propmt
+        #['word_1', 'word_2', 'word_3']#
+        tokenize_prompt =  word_tokenize(prompt, engine='newmm')
+        #'word_1 word_2 word_3'
+        str_token_prompt = " ".join(tokenize_prompt)
         
-        predictions, raw_outputs = model.predict([join_tokenize])
+        NER_prompt_prediction, raw_ouputs = NER_model.predict([str_token_prompt]) 
 
-        about_price = concatenate_keys_with_value_3(predictions,'3') 
+        words_about_price, _ = from_prediction(NER_prompt_prediction,'3') 
+        price = extract_integer_from_list(words_about_price) 
 
-        about_brand = concatenate_keys_with_value_3(predictions,'2')
+        words_about_brand, _ = from_prediction(NER_prompt_prediction,'2') 
 
-        about_product = ''.join(concatenate_keys_with_value_3(predictions,'0'))
+        words_about_product, list_product = from_prediction(NER_prompt_prediction,'0')
+        str_about_product = " ".join(words_about_product) 
 
-        list_product = list_productName(predictions,'0')
-
-        # about_product = ''.join(list_product)
-
-        price_in_list = extract_integer_from_list(about_price)
-
-        my_dict_intstace = MyDictionary()
-
-        state = ''
-
+    #filter by price
+        my_dict = MyDictionary()
         # Calculate the average price
         average_price = Product_ver2.objects.aggregate(Avg('price'))['price__avg']
-
-        print(f'predictions : {predictions}')
-
-        if (len(price_in_list ) > 0): 
-            if my_dict_intstace.is_cheaper(about_price) & (len(price_in_list) == 1): 
-                if about_brand[0] != '':
-                    product_uuids = Product_ver2.objects.filter(price__lt=int(price_in_list[0]), brand=about_brand[0]).values_list('vector_product_id', flat=True)
-                    state = 'cheaper'
-                else : 
-                    product_uuids = Product_ver2.objects.filter(price__lt=int(price_in_list[0])).values_list('vector_product_id', flat=True)
-                    state = 'cheaper'
-
-            elif my_dict_intstace.is_expensive(about_price) & (len(price_in_list) == 1):
-                if about_brand[0] != '':
-                    product_uuids = Product_ver2.objects.filter(price__gt=int(price_in_list[0]), brand=about_brand[0]).values_list('vector_product_id', flat=True)
-                    state = 'expensive'
-                else :
-                    product_uuids = Product_ver2.objects.filter(price__gt=int(price_in_list[0])).values_list('vector_product_id', flat=True)
-                    state = 'expensive'
-
-            elif (len(price_in_list) == 2): 
-                if about_brand[0] != '':
-                    product_uuids = Product_ver2.objects.filter(price__lt=int(max(price_in_list)),price__gt=int(min(price_in_list)),brand = about_brand[0]).values_list('vector_product_id', flat=True)
-                    state = 'price between'
-                else : 
-                    product_uuids = Product_ver2.objects.filter(price__lt=int(max(price_in_list)),price__gt=int(min(price_in_list))).values_list('vector_product_id', flat=True)
-                    state = 'price between'
-
-            else:
-                if about_brand[0] != '':     
-                    product_uuids = Product_ver2.objects.filter(brand = about_brand[0]).values_list('vector_product_id', flat=True) 
-                    state = 'one for all'
-                else : 
-                    product_uuids = Product_ver2.objects.all().values_list('vector_product_id', flat=True) 
-                    state = 'one for all'
-
-        else:
-            if my_dict_intstace.is_cheaper(about_price):
-                if about_brand[0] != '' : 
-                    product_uuids = Product_ver2.objects.filter(price__lt=int(average_price),brand = about_brand[0]).values_list('vector_product_id', flat=True)
-                    state = 'no price cheaper'
-                else:
-                    product_uuids = Product_ver2.objects.filter(price__lt=int(average_price)).values_list('vector_product_id', flat=True)
-            elif my_dict_intstace.is_expensive(about_price):
-                if about_brand[0] != '' :
-                    product_uuids = Product_ver2.objects.filter(price__gt=int(average_price),brand = about_brand[0]).values_list('vector_product_id', flat=True)
-                    state = 'no price expensive'
-                else : 
-                    product_uuids = Product_ver2.objects.filter(price__gt=int(average_price)).values_list('vector_product_id', flat=True)
-                    state = 'no price expensive'
-            elif (my_dict_intstace.is_expensive(about_price) and my_dict_intstace.is_cheaper(about_price)): 
-                if about_brand[0] != '' :
-                    product_uuids = Product_ver2.objects.filter(price__lt=int(max(average_price - (average_price * 0.2))),price__gt=int(average_price + (average_price * 0.2)),brand = about_brand[0]).values_list('vector_product_id', flat=True)
-                    state = 'no price price between'
-                else : 
-                    product_uuids = Product_ver2.objects.filter(price__lt=int(max(average_price - (average_price * 0.2))),price__gt=int(average_price + (average_price * 0.2))).values_list('vector_product_id', flat=True)
-                    state = 'no price price between'
-
-            else :   
-                if about_brand[0] != '' :     
-                    product_uuids = Product_ver2.objects.filter(brand =about_brand[0]).values_list('vector_product_id', flat=True) 
-                    state = 'one for all'
-                else : 
-                    product_uuids = Product_ver2.objects.all().values_list('vector_product_id', flat=True) 
-                    state = 'one for all'
-
-    
- 
-        
+        #productID filterd by price
+        product_uuids = get_product_uuids(price, my_dict,words_about_price, words_about_brand, average_price)
         # Convert QuerySet to list of UUIDs
         product_uuids = list(product_uuids)
 
-        #embed
-        # embedding_model = HuggingFaceEmbeddings(model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2") 
+    #filter by productName 
 
-        # Provide the path to the directory containing your saved model
-        model_path = 'C:/Users/natch/Desktop/Me/Hackatorn/model/embed/Embedding/'
+        #elastic search 
 
-        embedding_model = SentenceTransformer(model_path)
-
-        # Load the WangchanBERTa model and tokenizer
-        tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-        model = AutoModel.from_pretrained("C:/Users/natch/Desktop/Me/Hackatorn/model/embed/Embedding/")
-
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        model.to(device)
-
-        input_tokens = tokenizer(about_product, padding="max_length",
-                         truncation=True, max_length=256, return_tensors="pt")
-        input_tokens = {k: v.to(device) for k, v in input_tokens.items()}
-
-        outputs = model(**input_tokens)
-        about_product_embed = outputs.last_hidden_state[:, 0, :].detach().cpu().numpy()[0]
-
-        print(about_product_embed)
-
-        # about_product_embed = np.array(embedding_model.encode(about_product))
-        # about_product_embed_list = about_product_embed.tolist()
-        about_product_embed_list_str = '[' + ', '.join(map(str, about_product_embed)) + ']'
-
-        print('-------') 
-        print(about_product_embed_list_str)
-
-        sql_query_productName1 = """
+        elastic_search_query = """
             SELECT "vector_product_id" 
             FROM playground_product_ver2
             WHERE REPLACE("productName", '_', '') LIKE %s AND "vector_product_id" = ANY(%s)
         """
-        product_name_like = '%' + '%'.join(list_product) + '%'
+        product_name = '%' + '%'.join(list_product) + '%'
 
-        filtered_by_name = fetch_data(sql_query_productName1,[product_name_like,product_uuids])
-        filtered_by_name_ids = [id[0] for id in filtered_by_name] 
+        filtered_by_elastic = fetch_data(elastic_search_query,[product_name,product_uuids])
 
-        
-        sql_query_productName2 = """
+            #filterd by elastice search
+        filtered_by_elastic_ids = [id[0] for id in filtered_by_elastic] 
+
+        #similarity search on productName
+        word_product_embed_list_str = embed_process(words_about_product)
+
+        similarity_productName_query = """
             WITH Cosine_Similarity_Calc AS (
                 SELECT "vector_product_id",
                     ("productName_embed" <=> CAST(%s AS vector)) AS cosine_similarity
@@ -225,33 +186,16 @@ def form(request) :
             LIMIT 100;  
 
         """
-
-        top_100_results = fetch_data(sql_query_productName2,[about_product_embed_list_str,filtered_by_name_ids])
-        # Extract the distances and corresponding IDs
-        top_100_distances = [result[1] for result in top_100_results]
+    
+        top_100_results = fetch_data(similarity_productName_query,[word_product_embed_list_str,filtered_by_elastic_ids])
+        # top_100_distances = [result[1] for result in top_100_results]
         top_100_ids = [result[0] for result in top_100_results]
-       
-       
-       
-        input_tokens = tokenizer(prompt, padding="max_length",
-                         truncation=True, max_length=256, return_tensors="pt")
-        input_tokens = {k: v.to(device) for k, v in input_tokens.items()}
 
-        outputs = model(**input_tokens)
-        prompt_embed = outputs.last_hidden_state[:, 0, :].detach().cpu().numpy()[0]
-        # prompt_embed = np.array(embedding_model.encode(prompt))
-        # Convert the prompt embedding to a list
-        # prompt_embed_list = prompt_embed.tolist()
-        # Convert the list to a string that PostgreSQL can understand
-        prompt_embed_list_str = '[' + ', '.join(map(str, prompt_embed)) + ']'
-       
-       
-       
-        # Prepare the SQL query to find the top 5 closest vectors using L2 distance
+    #filter by productDes (using similarity search) 
+        prompt_embed_list_str = embed_process(prompt)
 
-        #vector_product_id
-        #embedding
-        sql_query_productDes = """
+        #similarity serach and median chunk measurement 
+        productDes_query = """
             WITH Cosine_Similarity_Calc AS (
                 SELECT "product_id",
                     (embedding <=> CAST(%s AS vector)) AS cosine_similarity
@@ -269,8 +213,7 @@ def form(request) :
             ORDER BY median_cosine_similarity ASC
             LIMIT 5;
         """
-
-        top_5_results = fetch_data(sql_query_productDes,[prompt_embed_list_str,top_100_ids])
+        top_5_results = fetch_data(productDes_query,[prompt_embed_list_str,top_100_ids])
 
         # Extract the distances and corresponding IDs
         top_5_distances = [result[1] for result in top_5_results]
@@ -279,27 +222,4 @@ def form(request) :
         # Query the database using the UUIDs
         products = Product_ver2.objects.filter(vector_product_id__in=top_5_ids)
 
-        print(prompt_embed)
-        print(prompt)
-        print(top_5_distances)  # Print top 5 distances for debugging
-        print(top_5_ids)
-        print(product_uuids)
-        print('------------------')
-        print(top_100_ids)
-        print('-----------------' ) 
-        print(price_in_list) 
-        print(about_price) 
-        print(state)
-        print(my_dict_intstace.is_cheaper(about_price))
-        print(predictions)
-        print(about_brand)
-        print(list_product)
-        print(about_product)
-        print(prompt)
-        print(filtered_by_name_ids)
-        print(product_name_like)
-        
-
         return render(request, "result.html", {'prompt': prompt, 'top_5_distances': top_5_distances, 'top_5_ids': top_5_ids,'products': products})
-    else:
-        print("gg")
