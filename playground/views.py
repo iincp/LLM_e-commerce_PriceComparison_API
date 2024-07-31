@@ -99,10 +99,17 @@ def get_product_uuids(price_in_list, my_dict_instance, about_price, about_brand,
     if len(price_in_list) > 0:
         return determine_price_bounds()
     else:
-        average_condition = 'cheaper' if my_dict_instance.is_cheaper(about_price) else 'expensive'
-        average_price_adjusted = average_price * (1.2 if average_condition == 'expensive' else 0.8)
-        return update_product_uuids(average_condition, average_price_adjusted)
 
+        if my_dict_instance.is_cheaper(about_price):
+            average_condition = 'cheaper'
+            average_price_adjusted = average_price * 0.8
+        elif my_dict_instance.is_expensive(about_price):
+            average_condition = 'expensive'
+            average_price_adjusted = average_price * 1.2
+        else:
+            return Product_ver2.objects.all().values_list('vector_product_id', flat=True)  # Default case when no condition matches
+        
+        return update_product_uuids(average_condition, average_price_adjusted)
 #------------------------------LOAD MODEL --------------------------------#
 
 # Provide the path to the directory containing your saved model
@@ -132,6 +139,7 @@ def form(request):
     #NER ON propmt
         #['word_1', 'word_2', 'word_3']#
         tokenize_prompt =  word_tokenize(prompt, engine='newmm')
+
         #'word_1 word_2 word_3'
         str_token_prompt = " ".join(tokenize_prompt)
         
@@ -221,5 +229,16 @@ def form(request):
 
         # Query the database using the UUIDs
         products = Product_ver2.objects.filter(vector_product_id__in=top_5_ids)
+
+        #-------------debugging-------------#
+
+        print(prompt)
+        print(product_name)
+        # print(filtered_by_elastic_ids) 
+        # print(top_100_ids) 
+        print(top_5_ids)
+        print(tokenize_prompt)
+        print('-----------------') 
+        
 
         return render(request, "result.html", {'prompt': prompt, 'top_5_distances': top_5_distances, 'top_5_ids': top_5_ids,'products': products})
